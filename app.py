@@ -70,90 +70,138 @@ def get_stock_price(stock_id):
         return False,f'查無此股票代碼:{stock_id}'
 
 # 畫股價趨勢圖
-def plot_stock_trend(stock_id,days=5):
-    
-    today = datetime.datetime.now()
-    start = today - datetime.timedelta(days=days+5)
-    
-    stock = twstock.Stock(stock_id)
-    stock.fetch_from(start.year,start.month)
-    
-    dates = stock.date[-days:]
-    prices = stock.close[-days:]
-    
-    #找最高與最低
-    max_price = max(prices)
-    min_price = min(prices)
-    max_date = dates[prices.index(max_price)]
-    min_date = dates[prices.index(min_price)]
-    
-    #畫圖
-    plt.figure(figsize=(8,4))
-    plt.plot(dates,prices,marker="o")
-    plt.title(f'{stock_id} 最近{days}日收盤價',fontsize=16,fontproperties=font_prop)
-    plt.xlabel('日期',fontsize=12,fontproperties=font_prop)
-    plt.ylabel('收盤價(元)',fontsize=12,fontproperties=font_prop)
-    plt.grid(True,linestyle='--',alpha=0.7)
-    plt.xticks(rotation=45, fontproperties=font_prop)
-    plt.yticks(fontproperties=font_prop)
-    
-    #標記最高點與最低點
-    plt.scatter([max_date],[max_price],color='#d62728',s=80,zorder=5,marker='v',label='最高價')
-    plt.scatter([min_date],[min_price],color='#1f77b4',s=80,zorder=5,marker='^',label='最低價')
-    
-    #美化文字
-    plt.text(max_date,max_price + 1,f'最高{max_price}',color='#d62728',fontsize=10,
-             ha='center',fontproperties=font_prop,bbox=dict(facecolor='white',alpha=0.8,edgecolor='none'))
-    plt.text(min_date,min_price - 2,f'最低{min_price}',color='#1f77b4',fontsize=10,
-             ha='center',fontproperties=font_prop,bbox=dict(facecolor='white',alpha=0.8,edgecolor='none'))
-    
-    filename = f'static/{stock_id}_trend.png'
-    plt.tight_layout()
-    plt.savefig(filename)
-    plt.close()
-    
-    return filename
+def plot_stock_trend(stock_id, days=5):
+    try:
+        # days 必須是數字
+        days = int(days)
+    except:
+        return None
+
+    # twstock crash risk 保護層
+    try:
+        stock = twstock.Stock(stock_id)
+    except Exception as e:
+        print("[twstock.Stock Error]", e)
+        return None
+
+    # 安全抓資料（避免 malformed data）
+    try:
+        today = datetime.datetime.now()
+        start = today - datetime.timedelta(days=days + 10)
+
+        stock.fetch_from(start.year, start.month)
+
+        # twstock 資料若異常 → raw_data 會是空的
+        if not stock.raw_data or len(stock.date) == 0 or len(stock.close) == 0:
+            print("[twstock] empty data:", stock_id)
+            return None
+
+        # 取最後 days 天的有效資料（避免資料量不足）
+        available = min(days, len(stock.date))
+
+        dates = stock.date[-available:]
+        prices = stock.close[-available:]
+
+        if len(prices) == 0:
+            print("[twstock] no price:", stock_id)
+            return None
+
+    except Exception as e:
+        print("[twstock fetch Error]", e)
+        return None
+
+    # ====== 畫圖 ======
+    try:
+        max_price = max(prices)
+        min_price = min(prices)
+        max_date = dates[prices.index(max_price)]
+        min_date = dates[prices.index(min_price)]
+
+        plt.figure(figsize=(8, 4))
+        plt.plot(dates, prices, marker="o")
+        plt.title(f"{stock_id} 最近 {days} 日收盤價", fontsize=16, fontproperties=font_prop)
+        plt.xlabel("日期", fontsize=12, fontproperties=font_prop)
+        plt.ylabel("收盤價(元)", fontsize=12, fontproperties=font_prop)
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.xticks(rotation=45, fontproperties=font_prop)
+        plt.yticks(fontproperties=font_prop)
+
+        plt.scatter([max_date], [max_price], color='#d62728', s=80, marker='v')
+        plt.scatter([min_date], [min_price], color='#1f77b4', s=80, marker='^')
+
+        plt.text(max_date, max_price + 1, f"最高 {max_price}",
+                 color='#d62728', fontsize=10, fontproperties=font_prop,
+                 ha='center', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+
+        plt.text(min_date, min_price - 2, f"最低 {min_price}",
+                 color='#1f77b4', fontsize=10, fontproperties=font_prop,
+                 ha='center', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+
+        filename = f"static/{stock_id}_trend.png"
+        plt.tight_layout()
+        plt.savefig(filename)
+        plt.close()
+
+        return filename
+
+    except Exception as e:
+        print("[Plot Error]", e)
+        return None
+
 
 # 構建股價文字和圖片網址
-def build_stock_reply(stock_id,days=5):
-    success, price_text = get_stock_price(stock_id)
+def build_stock_reply(stock_id, days=5):
+
+    # 股票代碼防呆
+    if not stock_id.isdigit() or len(stock_id) not in (4, 5):
+        return False, f"「{stock_id}」不是合法的股票代號。", None
+
+    try:
+        success, price_text = get_stock_price(stock_id)
+    except:
+        return False, f"無法取得 {stock_id} 的最新價格。", None
+
     if not success:
         return False, price_text, None
 
-    filename = plot_stock_trend(stock_id,days)
+    filename = plot_stock_trend(stock_id, days)
+
+    if filename is None:
+        return False, f"⚠️ {stock_id} 資料異常，目前無法取得趨勢圖。", None
+
     image_url = f"https://line-bot-stock-9881.onrender.com/{filename}"
     return True, price_text, image_url
 
 def parse_user_input(user_message):
-    
-    """
-    回傳
-    {
-     'mode':'single' or 'multi',
-     'stock_ids':['2330','2317'],
-     'days':5 or 30
-     }
-    """
+
     parts = user_message.strip().split()
+
     result = {
-        'mode':'single',
-        'stock_ids':[],
-        'days':5
-        }
-    
-    if parts[0] == '查' and len(parts) > 1 :
+        'mode': 'single',
+        'stock_ids': [],
+        'days': 5
+    }
+
+    # 多股票：查 2330 2317 2881
+    if parts[0] == '查' and len(parts) > 1:
         result['mode'] = 'multi'
-        result['stock_ids'] = parts[1:]
-        
-    else:
-        result['mode'] = 'single'
-        result['stock_ids'] = [parts[0]]
-        if len(parts) > 1 :
-            keyword = parts[1]
-            if keyword in ['30','30天','30日','月線'] :
-                result['days'] = 30
-                
+        # 過濾非法股票代碼
+        stocks = [p for p in parts[1:] if p.isdigit()]
+        result['stock_ids'] = stocks if stocks else []
+        return result
+
+    # 單股票（含天數）
+    stock = parts[0]
+    result['stock_ids'] = [stock]
+
+    # 判斷是否有天數參數
+    if len(parts) > 1:
+        keyword = parts[1]
+        if keyword in ['30', '30天', '30日', '月線']:
+            result['days'] = 30
+
     return result
+
 
 # ========== webhook區 ==========
 @app.route('/callback',methods=['post'])
