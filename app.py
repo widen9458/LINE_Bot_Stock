@@ -1,6 +1,6 @@
 import os
 import re
-#import datetime
+import datetime
 from typing import Tuple, Optional, Dict, Any, List
 
 from flask import Flask, request, abort
@@ -246,6 +246,13 @@ def build_stock_reply(stock_id: str, days: int = 5) -> Tuple[bool, str, Optional
     ok, price_text = get_stock_price_text(stock_id)
     if not ok:
         return False, price_text, None
+    
+    # ⭐ 交易時段判斷
+    if not is_taiwan_market_open():
+        return True, (
+            price_text
+            + "\n⚠️ 目前非台股交易時段，暫不提供趨勢圖，請於交易時間再試。"
+        ), None
 
     filename = plot_stock_trend(stock_id, days)
     if filename is None:
@@ -293,6 +300,22 @@ def parse_user_input(user_message: str) -> Dict[str, Any]:
 
     return result
 
+def is_taiwan_market_open(now: datetime.datetime | None = None) -> bool:
+    """
+    台股交易時間：週一～週五 09:00–13:30（台灣時間）
+    注意：這裡不處理國定假日，只處理時間與星期
+    """
+    if now is None:
+        now = datetime.datetime.now()
+
+    # 週一=0, 週日=6
+    if now.weekday() >= 5:
+        return False
+
+    market_open = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    market_close = now.replace(hour=13, minute=30, second=0, microsecond=0)
+
+    return market_open <= now <= market_close
 
 # ======================
 # Webhook
